@@ -63,3 +63,143 @@ sudo systemctl stop phone-tun2socks.service 2>/dev/null || true
 sudo rm -f /etc/NetworkManager/dispatcher.d/90-phone-tun2socks \
   /etc/NetworkManager/dispatcher.d/90-phone-tun2socks.yaml
 ```
+
+
+
+## SELinux Configuration (Fedora)
+
+On Fedora with SELinux enabled, `tun2socks` may generate AVC denials when accessing the SOCKS5 proxy or the TUN device.
+
+When launched through NetworkManager and a transient systemd unit, `tun2socks` may run under the `init_t` SELinux domain.
+
+The following denials were observed:
+
+| Operation | SELinux target | Denied permission |
+|---|---|---|
+| Connecting to SOCKS5 proxy on TCP port 8228 | `unreserved_port_t` | `tcp_socket name_connect` |
+| Reading `/dev/net/tun` | `tun_tap_device_t` | `chr_file read` |
+| Writing `/dev/net/tun` | `tun_tap_device_t` | `chr_file write` |
+
+A small custom SELinux policy can authorize these operations without disabling SELinux.
+
+### 1. Install dependencies
+
+```bash
+sudo dnf install checkpolicy policycoreutils policycoreutils-python-utils
+```
+
+### 2. Create the policy
+
+Create `phone_tun2socks.te`:
+
+```selinux
+module phone_tun2socks 1.1;
+
+require {
+    type init_t;
+    type tun_tap_device_t;
+
+    attribute port_type;
+
+    class tcp_socket name_connect;
+    class chr_file { read write };
+}
+
+type phone_proxy_port_t;
+typeattribute phone_proxy_port_t port_type;
+
+# Allow outgoing TCP connections to the SOCKS5 proxy port.
+allow init_t phone_proxy_port_t:tcp_socket name_connect;
+
+# Allow reading and writing the TUN device.
+allow init_t tun_tap_device_t:chr_file { read write };
+```
+
+**Note:** This policy applies to the `init_t` domain, not exclusively to the `tun2socks` executable. A dedicated SELinux domain would offer stronger isolation.
+
+### 3. Compile and install
+
+From the directory containing `phone_tun2socks.te`:
+
+```bash
+checkmodule -M -m \
+    -o phone_tun2socks.mod \
+    phone_tun2socks.te
+
+semodule_package \
+    -o phone_tun2socks.pp \
+    -m phone_tun2socks.mod
+
+sudo semodule -i phone_tun2socks.pp
+```
+
+The module name and compiled `.mod` filename must match.
+
+### 4. Register the SOCKS5 proxy port
+
+Map TCP port `8228` to the newly defined SELinux port type:
+
+```bash
+sudo semanage port -a \
+    -t phone_proxy_port_t \
+    -p tcp 8228
+```
+
+If the port already has a local custom mapping, inspect it before changing it:
+
+```bash
+sudo semanage port -l | grep 8228
+```
+
+Only TCP is registered because the observed proxy connection denial was for `tcp_socket name_connect`. UDP permissions should be handled separately if actual denials are observed.
+
+### 5. Verify
+
+Confirm the module and port mapping:
+
+```bash
+sudo semodule -l | grep phone_tun2socks
+sudo semanage port -l | grep phone_proxy_port_t
+```
+
+Inspect new SELinux denials:
+
+```bash
+sudo ausearch -m AVC,USER_AVC -ts recent -c tun2socks
+```
+
+Historical denials remain in the audit logs even after fixing the policy.
+
+Once connectivity has been verified, SELinux can be switched back to enforcing mode if it was temporarily made permissive:
+
+```bash
+sudo setenforce 1
+getenforce
+```
+
+Reconnect to the configured phone Wi-Fi network and verify that the tunnel works under enforcing mode.
+
+### 6. Uninstall the policy
+
+To reverse these changes:
+
+```bash
+sudo semanage port -d -p tcp 8228
+sudo semodule -r phone_tun2socks
+```
+
+Only delete the port mapping if it was created specifically for this configuration.
+
+### Troubleshooting
+
+If additional SELinux denials appear:
+
+```bash
+sudo ausearch -m AVC,USER_AVC -ts recent
+```
+
+Inspect the source context (`scontext`), target context (`tcontext`), object class (`tclass`), and denied operation before extending the policy.
+
+Avoid disabling SELinux globally or automatically applying every permission suggested by `audit2allow`.
+
+The policy above addresses only the denials observed in this setup. Other installations may require different permissions or SELinux domains.
