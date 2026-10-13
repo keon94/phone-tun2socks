@@ -1,4 +1,4 @@
-# Installed to /etc/phone-tun2socks/config.yaml
+# Flat YAML scalar settings (no nested maps or lists).
 ssid: TetherFi
 interface: wlo1
 proxy_url: socks5://192.168.49.1:8228

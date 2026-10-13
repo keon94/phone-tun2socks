@@ -1,0 +1,99 @@
+#!/bin/sh
+# NetworkManager dispatcher: connection events start/stop a transient systemd service.
+# Install beside this script: 90-phone-tun2socks.yaml
+set -eu
+
+NAME=phone-tun2socks
+CONFIG="/etc/phone-tun2socks/config.yaml"
+
+[ -r "$CONFIG" ] || { echo "Missing config: $CONFIG" >&2; exit 1; }
+
+mapfile -t config < <(
+    yq -r '
+        .ssid,
+        .interface,
+        .proxy_url,
+        .tun_interface,
+        .tun_address
+    ' "$CONFIG"
+)
+
+SSID=${config[0]}
+WIFI_IFACE=${config[1]}
+PROXY=${config[2]}
+TUN=${config[3]}
+TUN_ADDR=${config[4]}
+
+[ -n "$SSID" ] && [ -n "$WIFI_IFACE" ] && [ -n "$PROXY" ] && [ -n "$TUN" ] && [ -n "$TUN_ADDR" ] || {
+    echo "Missing required YAML config setting" >&2; exit 1;
+}
+
+case "${1:-}" in
+    run)
+        # Runs inside the transient systemd unit, NOT inside NetworkManager dispatcher.
+        # Refuse to take over networking if the phone is no longer the current connection.
+        [ "$(nmcli -g GENERAL.CONNECTION device show "$WIFI_IFACE")" != '--' ] || exit 1
+        CURRENT_UUID=$(nmcli -g GENERAL.CON-UUID device show "$WIFI_IFACE")
+        CURRENT_SSID=$(nmcli -g 802-11-wireless.ssid connection show "$CURRENT_UUID")
+        [ "$CURRENT_SSID" = "$SSID" ] || exit 1
+
+        # Phone proxy must be directly reachable on this Wi-Fi network.
+        PROXY_IP=${PROXY#*://}
+        PROXY_IP=${PROXY_IP%%:*}
+        case "$PROXY_IP" in
+            ''|*[!0-9.]*) echo 'proxy_url requires an IPv4 literal host' >&2; exit 1 ;;
+        esac
+        ROUTE=$(ip -4 route get "$PROXY_IP")
+        case "$ROUTE" in
+            *" dev $WIFI_IFACE "*) ;;
+            *) echo "Proxy is not routed via $WIFI_IFACE" >&2; exit 1 ;;
+        esac
+        case "$ROUTE" in
+            *' via '*) echo 'Proxy must be on the directly connected Wi-Fi network' >&2; exit 1 ;;
+        esac
+
+        # Refuse to clobber an interface belonging to another program.
+        if ip link show dev "$TUN" >/dev/null 2>&1; then
+            echo "$TUN already exists" >&2
+            exit 1
+        fi
+        child=
+        cleanup() {
+            trap - EXIT
+            if [ -n "$child" ]; then
+                kill "$child" 2>/dev/null || :
+                wait "$child" 2>/dev/null || :
+            fi
+            # Deleting the TUN also deletes its associated /1 routes.
+            ip link del dev "$TUN" 2>/dev/null || :
+        }
+        trap cleanup EXIT
+        trap 'exit 0' INT TERM HUP
+
+        ip tuntap add dev "$TUN" mode tun
+        ip addr add "$TUN_ADDR" dev "$TUN"
+        ip link set "$TUN" up
+        ip route add 0.0.0.0/1 dev "$TUN"
+        ip route add 128.0.0.0/1 dev "$TUN"
+
+        tun2socks --device "tun://$TUN" --proxy "$PROXY" --interface "$WIFI_IFACE" &
+        child=$!
+        wait "$child"
+        ;;
+    *)
+        # NetworkManager dispatch: $1 = interface, $2 = up/down action.
+        [ "${1:-}" = "$WIFI_IFACE" ] || exit 0
+        case "${2:-}" in up|down) ;; *) exit 0 ;; esac
+        [ -n "${CONNECTION_UUID:-}" ] || exit 0
+        EVENT_SSID=$(nmcli -g 802-11-wireless.ssid connection show "$CONNECTION_UUID" 2>/dev/null) || exit 0
+        [ "$EVENT_SSID" = "$SSID" ] || exit 0
+        if [ "$2" = up ]; then
+            # Starts immediately but does not keep the NetworkManager dispatcher alive.
+            systemd-run --quiet --collect --unit="$NAME" \
+                --property=KillMode=process \
+                "$0" run
+        else
+            systemctl stop --no-block "$NAME.service"
+        fi
+        ;;
+esac

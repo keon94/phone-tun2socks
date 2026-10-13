@@ -1,71 +1,65 @@
 # Phone Wi-Fi tun2socks
 
-Event-driven NetworkManager → systemd → tun2socks routing on Fedora/Linux. Connecting to a configured phone SSID starts the tunnel; disconnecting stops it and removes the routes. No periodic polling.
+A minimal, **event-driven** NetworkManager dispatcher script. Connecting to your phone's configured Wi-Fi SSID starts a `tun2socks` tunnel; disconnecting stops it and restores the normal route.
+
+## Contents
+
+- `90-phone-tun2socks`: NetworkManager dispatcher shell script and tunnel setup/cleanup logic.
+- `90-phone-tun2socks.yaml`: configuration alongside the script.
+
+The script uses `systemd-run` to keep the tunnel alive in a *transient* systemd unit after the short-lived dispatcher event finishes. `systemctl stop` sends SIGTERM to the wrapper, which cleans up `tun0` and the associated routes. This avoids orphaning a background process inside NetworkManager's dispatcher service.
 
 ## Requirements
 
-- NetworkManager and systemd
-- Python 3 with PyYAML (`sudo dnf install python3-pyyaml` on Fedora)
-- `tun2socks` installed and on the systemd service's PATH (`command -v tun2socks`)
-- Root privileges for TUN and route operations
-- A saved NetworkManager Wi-Fi connection for your phone's SSID
+Fedora/Linux with NetworkManager, systemd (`systemd-run`), `iproute2`, `yq`, and a `tun2socks` binary on the system service PATH. Root access is required for installation and route changes. No PyYAML dependency; the config accepts a **flat subset of YAML scalar strings** (not nested YAML). The example uses SOCKS5, matching TetherFi's SOCKS proxy option.
 
 ## Install
 
-```bash
-sudo dnf install python3-pyyaml
-sudo ./install.sh
-sudoedit /etc/phone-tun2socks/config.yaml
+```sh
+sudo install -o root -g root -m 755 90-phone-tun2socks /etc/NetworkManager/dispatcher.d/90-phone-tun2socks
+sudo install -o root -g root -m 644 90-phone-tun2socks.yaml /etc/phone-tun2socks/config.yaml
+sudoedit /etc/NetworkManager/dispatcher.d/90-phone-tun2socks.yaml
 ```
 
-Example YAML:
+Edit the YAML to match your SSID, wireless interface and proxy. Both files must remain side by side; the YAML is not executable. No service `enable` or `daemon-reload` is necessary. If already connected to the phone, reconnect once to trigger an `up` event. The dispatcher only reacts to **connection state**, not SSID visibility.
 
-```yaml
-ssid: TetherFi
-interface: wlo1
-proxy_url: socks5://192.168.49.1:8228
-tun_interface: tun0
-tun_address: 10.0.0.1/24
-```
-
-Set `ssid` to the exact phone SSID, and adjust the interface and proxy URL. SOCKS5 is the default, matching the working TetherFi setup; `http://host:port` is also supported by compatible tun2socks builds.
-
-Connect to the phone's Wi-Fi via NetworkManager. The dispatcher starts the service when the matching profile goes `up`, and stops it on `down`. **Do not enable the systemd service at boot.**
-
-If already connected during installation, disconnect and reconnect once, or manually start with `sudo systemctl start phone-tun2socks.service`.
+**Check your tun2socks path:** The transient systemd unit must find `tun2socks` on its PATH (`command -v tun2socks`). If your binary is in a user-only location, install it into `/usr/local/bin` or use an absolute path in the script.
 
 ## Check
 
-```bash
-systemctl status phone-tun2socks
-journalctl -u phone-tun2socks -f
-ip -4 route get 1.1.1.1
-ip -4 route get 192.168.49.1
+```sh
+systemctl status phone-tun2socks.service
+journalctl -u phone-tun2socks.service -f
+ip -4 route get 1.1.1.1          # should go through tun0 while connected
+ip -4 route get 192.168.49.1     # should go directly via wlo1
 ```
 
-When active, ordinary IPv4 destinations should use `tun0`; the proxy address should use `wlo1`.
+To manually stop an active tunnel without disconnecting Wi-Fi:
 
-## How routing works
+```sh
+sudo systemctl stop phone-tun2socks.service
+```
 
-The script keeps NetworkManager's default route untouched and adds two `/1` routes via the TUN interface. A `/32` on-link route to the phone proxy prevents routing the proxy's own TCP connection into the tunnel. On service stop or failure, it removes only routes it added and deletes its TUN interface. The normal default route is therefore still present. Existing more-specific LAN, Docker, and VM routes take precedence.
+Reconnecting Wi-Fi starts it again. An explicit `systemctl start` does **not** work because the transient unit is created by `systemd-run` on the `up` event.
 
-## Limitations and safety
+## Routing behavior
 
-- The proxy must be **directly reachable over the configured Wi-Fi interface**, as with a typical phone hotspot. This implementation does not support a proxy routed through a separate gateway.
-- No IPv6 tunneling or kill switch: IPv6 and other non-tunneled traffic can bypass the proxy, and traffic falls back to the normal route after shutdown.
-- DNS behavior depends on local resolver settings; verify DNS if avoiding leaks matters.
-- Dispatcher events reflect connection state, not mere SSID visibility. NetworkManager handles Wi-Fi reconnects.
-- A live Wi-Fi connection with a dead proxy is not automatically detected; this intentionally avoids polling. Stop the service or disconnect the SSID in that situation.
-- The `tun0` name and route prefixes must not be owned by another application.
-- After editing YAML, restart the service or reconnect Wi-Fi to apply changes.
+On connection, the script creates `tun0`, assigns `10.0.0.1/24`, and adds two IPv4 routes (`0.0.0.0/1` and `128.0.0.0/1`) through it. This leaves NetworkManager's default route untouched; the original default route remains available. More-specific routes (including the directly connected phone proxy) win over the `/1` routes.
+
+On disconnect, it stops the transient unit, which terminates `tun2socks` and deletes the TUN interface. Deleting that interface automatically removes both `/1` routes. No gateway backup/restore is required.
+
+## Limitations
+
+- Assumes the proxy is an **IPv4 literal directly reachable** via the configured Wi-Fi interface, and is in the connected phone subnet.
+- No IPv6 tunneling, DNS leak protection, or kill switch. IPv4 traffic falls back to the standard route when the TUN is removed; IPv6 may bypass the proxy even while active.
+- The script handles normal stop and tun2socks process exits, not `SIGKILL` or power loss. If needed, manually remove a stale `tun0` with `sudo ip link del tun0`.
+- This deliberately does not monitor proxy health. A dead proxy with an active Wi-Fi connection will not trigger a disconnect event.
+- Keep the shell script root-owned and not writable by unprivileged users. Configuration must be treated as trusted administrative input.
 
 ## Uninstall
 
-```bash
-sudo systemctl stop phone-tun2socks.service
-sudo rm -f /etc/NetworkManager/dispatcher.d/90-phone-tun2socks
-sudo rm -f /etc/systemd/system/phone-tun2socks.service
-sudo rm -f /usr/local/libexec/phone-tun2socks
-sudo systemctl daemon-reload
-# Optional: sudo rm -rf /etc/phone-tun2socks
+```sh
+sudo systemctl stop phone-tun2socks.service 2>/dev/null || true
+sudo rm -f /etc/NetworkManager/dispatcher.d/90-phone-tun2socks \
+  /etc/NetworkManager/dispatcher.d/90-phone-tun2socks.yaml
 ```
