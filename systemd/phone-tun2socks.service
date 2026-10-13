@@ -1,0 +1,12 @@
+[Unit]
+Description=Phone Wi-Fi tun2socks tunnel
+After=NetworkManager.service
+Requires=NetworkManager.service
+
+[Service]
+Type=exec
+ExecStart=/usr/local/libexec/phone-tun2socks
+Restart=no
+TimeoutStopSec=10
+
+# Do not enable at boot; NetworkManager dispatcher starts/stops this unit.

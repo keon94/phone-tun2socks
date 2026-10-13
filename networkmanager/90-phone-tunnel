@@ -1,0 +1,9 @@
+#!/bin/sh
+# Invoked by NetworkManager. Filter by SSID in the Python entrypoint.
+# Never block NetworkManager waiting for the tunnel service.
+case "$2" in
+    up|down)
+        exec /usr/bin/python3 /usr/local/libexec/phone-tun2socks/phone_tun2socks.py dispatch "$1" "$2"
+        ;;
+esac
+exit 0

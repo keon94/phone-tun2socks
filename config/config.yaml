@@ -1,0 +1,6 @@
+# Installed to /etc/phone-tun2socks/config.yaml
+ssid: TetherFi
+interface: wlo1
+proxy_url: socks5://192.168.49.1:8228
+tun_interface: tun0
+tun_address: 10.0.0.1/24
