@@ -30,7 +30,7 @@ ssid: "DIRECT-TF-TetherFi"
 tun_name: "tun0"
 tun_address: "10.0.0.2/24"
 dns_primary: "8.8.8.8"
-dns_second: "100.100.100.100"
+dns_secondary: "100.100.100.100"
 proxy: "socks5://192.168.49.1:8228"
 ```
 
@@ -38,7 +38,7 @@ DNS settings are technically optional. Leave a value empty to leave that DNS set
 
 ```yaml
 dns_primary: ""
-dns_second: ""
+dns_secondary: ""
 ```
 
 However, in the case of `TetherFuseNet` The proxy at `192.168.49.1:8228` does not answer DNS queries, so you likely need the manual overrides to get DNS resolution to work.

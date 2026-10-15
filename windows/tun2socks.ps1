@@ -51,7 +51,7 @@ function Import-TunnelConfig {
         }
     }
 
-    foreach ($key in @('dns_primary', 'dns_second')) {
+    foreach ($key in @('dns_primary', 'dns_secondary')) {
         if (-not $config.ContainsKey($key)) {
             $config[$key] = ''
         }
@@ -267,7 +267,7 @@ function main {
     $TunGateway = $tunConfig.Gateway
 
     $DnsPrimary = $config['dns_primary']
-    $DnsSecond  = $config['dns_second']
+    $DnsSecond  = $config['dns_secondary']
     $Proxy      = $config['proxy']
     $Tun2Socks  = Join-Path $PSScriptRoot 'tun2socks.exe'
     # -------------------------
