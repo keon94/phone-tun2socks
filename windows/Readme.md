@@ -10,8 +10,8 @@ Keep these files together in one directory, for example `C:\Program Files\Tun2So
 
 | File | Purpose |
 | --- | --- |
-| `turn2socks.ps1` | Watches Wi-Fi events and starts or stops the tunnel. |
-| `turn2socks.yaml` | Configuration read by the watcher. Its basename must match the PowerShell script. |
+| `tun2socks.ps1` | Watches Wi-Fi events and starts or stops the tunnel. |
+| `tun2socks.yaml` | Configuration read by the watcher. Its basename must match the PowerShell script. |
 | `wlanTunnelSignal.cs` | C# event-watcher type imported by the PowerShell script. |
 | `register-tun2socks-task.ps1` | Registers or removes the login task. |
 
