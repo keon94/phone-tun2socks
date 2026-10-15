@@ -23,7 +23,7 @@ Additionally, you need the TUN binaries available on your PATH. You might as wel
 
 ## Configure
 
-Edit `turn2socks.yaml` as needed. The below are the personal config that were used (with TetherFuseNet and Tailscale running) during development:
+Edit `tun2socks.yaml` as needed. The below are the personal config that were used (with TetherFuseNet and Tailscale running) during development:
 
 ```yaml
 ssid: "DIRECT-TF-TetherFi"
@@ -49,7 +49,7 @@ Open PowerShell in the directory containing the files and run:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
-.\turn2socks.ps1
+.\tun2socks.ps1
 ```
 
 The watcher prints the current Wi-Fi SSID and logs WLAN event IDs such as `8001` (connected) and `8003` (disconnected). Leave this window open while testing. Press **Ctrl+C** to stop the watcher; it should also stop the tunnel during cleanup.
