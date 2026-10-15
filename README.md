@@ -15,7 +15,8 @@ This bypasses both limitations - you effectively get a full unrestricted interne
 This is in particular useful for people who travel a lot and don't have constant Wifi access. They can simply use this to connect their Phone's data to their laptop.
 
 ### Limitations
-This works on Android devices as they are allowed to broadcast SSIDs. As far as I know, iOS devices can't do that.
+This works against Android devices as they are allowed to broadcast SSIDs. As far as I know, iOS devices can't do that. In general, however, this tool is agnostic to the SOCKS backend and can run against any server that it can connect to on a particular SSID's LAN.
+Phone Hotspoting just happens to be the most natural use case and advantage of it.
 
 ### Requirements
 - A Linux or Windows machine
