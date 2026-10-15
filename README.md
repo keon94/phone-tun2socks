@@ -11,6 +11,9 @@ much data you can use with their hotspot.
 
 This bypasses both limitations - you effectively get a full unrestricted internet connection that is proxied by your phone.
 
+### Audience
+This is in particular useful for people who travel a lot and don't have constant Wifi access. They can simply use this to connect their Phone's data to their laptop.
+
 ### Limitations
 This works on Android devices as they are allowed to broadcast SSIDs. As far as I know, iOS devices can't do that.
 

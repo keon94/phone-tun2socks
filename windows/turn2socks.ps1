@@ -186,7 +186,7 @@ function Start-Tunnel {
     Remove-TunnelRoute
 
     $script:ProxyProcess = Start-Process -FilePath $Tun2Socks `
-        -ArgumentList @('-d', $TunName, '-p', "$Proxy") `
+        -ArgumentList @('--device', $TunDevice, '-p', "$Proxy") `
         -PassThru -NoNewWindow
 
     $adapter = $null
@@ -257,7 +257,10 @@ function main {
     $config = Import-TunnelConfig -Path $configPath
 
     $TargetSSID = $config['ssid']
-    $TunName    = $config['tun_name']
+    $TunName = $config['tun_name']
+
+    $TunGuid = '7FE5A4A1-1326-40E2-974C-EF617156ACA8'
+    $TunDevice = "tun://${TunName}?guid={$TunGuid}"
 
     $tunConfig = ConvertFrom-TunAddressCidr -Cidr $config['tun_address']
     $TunAddress = $tunConfig.Address
