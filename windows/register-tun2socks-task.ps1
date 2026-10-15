@@ -6,7 +6,7 @@ $ErrorActionPreference = 'Stop'
 
 # Keep this filename in sync with the watcher script beside this installer.
 $TaskName = 'Tun2Socks Wi-Fi Watcher'
-$WatcherPath = Join-Path $PSScriptRoot 'turn2socks.ps1'
+$WatcherPath = Join-Path $PSScriptRoot 'tun2socks.ps1'
 
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principalCheck = [Security.Principal.WindowsPrincipal]::new($identity)
