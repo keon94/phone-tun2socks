@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 # NetworkManager dispatcher: connection events start/stop a transient systemd service.
 # Install beside this script: 90-tun2socks.yaml
 set -eu
