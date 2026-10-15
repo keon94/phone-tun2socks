@@ -1,6 +1,6 @@
 # Universal Phone Hotspot
 
-A small utility that allows your Windows or Linux machine connect to a phone Wi-Fi hotspot and route all traffic through it via a TUN interface, with
+A small utility that allows your Windows or Linux machine to connect to a phone Wi-Fi hotspot and route all traffic through it via a TUN interface, with
 the use of [tun2socks](https://github.com/xjasonlyu/tun2socks) as the backend, effectively bypassing all of your traffic's ISP's DNS and routing.
 
 This has been written in an event driven way, so it runs very efficiently on your system and requires no additional setup after the first time.
