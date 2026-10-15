@@ -38,10 +38,9 @@ function Import-TunnelConfig {
     }
 
     $requiredKeys = @(
-        'target_ssid',
+        'ssid',
         'tun_name',
         'tun_address',
-        'tun_gateway',
         'proxy'
     )
 
@@ -62,117 +61,98 @@ function Import-TunnelConfig {
 
 }
 
-$configPath = [System.IO.Path]::ChangeExtension($PSCommandPath, '.yaml')
-$config = Import-TunnelConfig -Path $configPath
+function ConvertFrom-TunAddressCidr {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Cidr
+    )
 
-$TargetSSID = $config['target_ssid']
-$TunName    = $config['tun_name']
-$TunAddress = $config['tun_address']
-$TunGateway = $config['tun_gateway']
-$DnsPrimary = $config['dns_primary']
-$DnsSecond  = $config['dns_second']
-$Proxy      = $config['proxy']
-$Tun2Socks  = Join-Path $PSScriptRoot 'tun2socks.exe'
-# -------------------------
-
-$ErrorActionPreference = 'Stop'
-$script:ProxyProcess = $null
-$script:TunnelActive = $false
-
-if (-not ([Security.Principal.WindowsPrincipal]::new(
-        [Security.Principal.WindowsIdentity]::GetCurrent()
-)).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    throw 'Run this script as Administrator.'
-}
-
-if (-not (Test-Path $Tun2Socks)) {
-    throw "Could not find tun2socks.exe: $Tun2Socks"
-}
-
-wevtutil sl Microsoft-Windows-WLAN-AutoConfig/Operational /e:true
-
-Add-Type -AssemblyName System.Diagnostics.EventLog
-
-$eventLogAssembly = [System.Diagnostics.Eventing.Reader.EventLogWatcher].Assembly.Location
-$consoleAssembly = [System.Console].Assembly.Location
-
-Add-Type -ReferencedAssemblies @(
-    $eventLogAssembly,
-    $consoleAssembly
-) -TypeDefinition @'
-using System;
-using System.Diagnostics.Eventing.Reader;
-
-public static class WlanTunnelSignal {
-    private static EventLogWatcher watcher;
-
-    public static string TargetSSID = "";
-    public static volatile bool Connected = false;
-    public static volatile bool Changed = false;
-
-    public static void Start() {
-        var query = new EventLogQuery(
-            "Microsoft-Windows-WLAN-AutoConfig/Operational",
-            PathType.LogName,
-            "*[System[(EventID=8001 or EventID=8003)]]"
-        );
-
-        watcher = new EventLogWatcher(query);
-        watcher.EventRecordWritten += (sender, e) => {
-            if (e.EventException != null) {
-                System.Console.WriteLine("WLAN watcher error: " + e.EventException.Message);
-                return;
-            }
-
-            if (e.EventRecord == null) return;
-
-            using (var record = e.EventRecord) {
-                string message = record.FormatDescription();
-                bool isTarget = false;
-
-                foreach (string line in message.Split(
-                    new[] { '\r', '\n' },
-                    StringSplitOptions.RemoveEmptyEntries
-                )) {
-                    int marker = line.IndexOf("SSID:", StringComparison.OrdinalIgnoreCase);
-                    if (marker >= 0 &&
-                        line.Substring(marker + 5).Trim().Equals(
-                            TargetSSID, StringComparison.OrdinalIgnoreCase
-                        )) {
-                        isTarget = true;
-                        break;
-                    }
-                }
-
-                System.Console.WriteLine(
-                    "WLAN event " + record.Id +
-                    (isTarget ? " for target SSID" : " for another SSID")
-                );
-
-                if (isTarget && record.Id == 8001) {
-                    Connected = true;
-                    Changed = true;
-                } else if (isTarget && record.Id == 8003) {
-                    Connected = false;
-                    Changed = true;
-                }
-            }
-        };
-
-        watcher.Enabled = true;
+    $parts = $Cidr -split '/', 2
+    if ($parts.Count -ne 2) {
+        throw "tun_address must be CIDR format, such as 10.0.0.2/24."
     }
 
-    public static void Stop() {
-        if (watcher != null) {
-            watcher.Enabled = false;
-            watcher.Dispose();
-            watcher = null;
+    $ip = $null
+    if (-not [System.Net.IPAddress]::TryParse($parts[0], [ref]$ip) -or
+            $ip.AddressFamily -ne [System.Net.Sockets.AddressFamily]::InterNetwork) {
+        throw "tun_address must contain a valid IPv4 address."
+    }
+
+    $prefixLength = 0
+    if (-not [int]::TryParse($parts[1], [ref]$prefixLength) -or
+            $prefixLength -lt 1 -or $prefixLength -gt 32) {
+        throw "tun_address must have a valid prefix length from 1 to 32."
+    }
+
+    # Preserve the current convention: gateway is the address before the TUN address.
+    $gatewayBytes = $ip.GetAddressBytes()
+    for ($i = 3; $i -ge 0; $i--) {
+        if ($gatewayBytes[$i] -gt 0) {
+            $gatewayBytes[$i]--
+            break
         }
+        $gatewayBytes[$i] = 255
+    }
+
+    [pscustomobject]@{
+        Address      = $ip.ToString()
+        PrefixLength = $prefixLength
+        Gateway      = ([System.Net.IPAddress]::new([byte[]]$gatewayBytes)).ToString()
     }
 }
-'@
 
-[WlanTunnelSignal]::TargetSSID = $TargetSSID
+function Add-Types {
+
+    Add-Type -AssemblyName System.Diagnostics.EventLog
+
+    if (-not ("WlanTunnelSignal" -as [type])) {
+
+        $eventLogAssembly = [System.Diagnostics.Eventing.Reader.EventLogWatcher].Assembly.Location
+        $consoleAssembly = [System.Console].Assembly.Location
+
+        $wlanTunnelSignalSrcPath = Join-Path $PSScriptRoot 'wlanTunnelSignal.cs'
+
+        Add-Type -Path $wlanTunnelSignalSrcPath -ReferencedAssemblies @(
+            $eventLogAssembly,
+            $consoleAssembly
+        )
+    }
+}
+
+function Get-TunnelDnsServers {
+    $configured = @($DnsPrimary, $DnsSecond) |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+
+    if ($configured.Count -gt 0) {
+        return $configured
+    }
+
+    $profilePattern = '^{0}(?:\s+\d+)?$' -f [regex]::Escape($TargetSSID)
+
+    $profile = Get-NetConnectionProfile -ErrorAction Stop |
+            Where-Object { $_.Name -match $profilePattern } |
+            Select-Object -First 1
+
+    if (-not $profile) {
+        throw "Could not find the active network profile for '$TargetSSID'."
+    }
+
+    $servers = @(
+    Get-DnsClientServerAddress `
+            -InterfaceIndex $profile.InterfaceIndex `
+            -AddressFamily IPv4 |
+            ForEach-Object { $_.ServerAddresses } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+            Select-Object -Unique
+    )
+
+    if ($servers.Count -eq 0) {
+        throw "The '$TargetSSID' interface has no IPv4 DNS servers to inherit."
+    }
+
+    Write-Host "Using DNS from '$TargetSSID': $($servers -join ', ')"
+    return $servers
+}
 
 function Remove-TunnelRoute {
     Get-NetRoute -InterfaceAlias $TunName `
@@ -206,7 +186,7 @@ function Start-Tunnel {
     Remove-TunnelRoute
 
     $script:ProxyProcess = Start-Process -FilePath $Tun2Socks `
-        -ArgumentList @('-d', $TunName, '-p', "socks5://$Proxy") `
+        -ArgumentList @('-d', $TunName, '-p', "$Proxy") `
         -PassThru -NoNewWindow
 
     $adapter = $null
@@ -228,27 +208,26 @@ function Start-Tunnel {
         source=static addr=$TunAddress mask=255.255.255.0 gateway=none >$null 2>&1
     if ($LASTEXITCODE -ne 0) { throw 'Failed to set the tunnel address.' }
 
-    $dnsServers = @()
-    foreach ($server in @($DnsPrimary, $DnsSecond)) {
-        if (-not [string]::IsNullOrWhiteSpace($server)) {
-            $dnsServers += $server
-        }
+    $dnsServers = @(Get-TunnelDnsServers)
+    $primaryDns = [string]$dnsServers[0]
+
+    $dnsOutput = & netsh interface ipv4 set dnsservers `
+        "name=$TunName" source=static "address=$primaryDns" `
+        register=none validate=no 2>&1
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to set primary DNS ($primaryDns): $($dnsOutput -join ' ')"
     }
 
-    if ($dnsServers.Count -eq 0) {
-        # Reset the interface to automatic DNS configuration.
-        netsh interface ipv4 set dnsservers name="$TunName" `
-            source=dhcp >$null 2>&1
-        if ($LASTEXITCODE -ne 0) { throw 'Failed to reset DNS to automatic.' }
-    } else {
-        netsh interface ipv4 set dnsservers name="$TunName" `
-            source=static address=$dnsServers[0] register=none validate=no >$null 2>&1
-        if ($LASTEXITCODE -ne 0) { throw 'Failed to set primary DNS.' }
+    for ($i = 1; $i -lt $dnsServers.Count; $i++) {
+        $extraDns = [string]$dnsServers[$i]
 
-        for ($i = 1; $i -lt $dnsServers.Count; $i++) {
-            netsh interface ipv4 add dnsservers name="$TunName" `
-                address=$dnsServers[$i] index=$($i + 1) validate=no >$null 2>&1
-            if ($LASTEXITCODE -ne 0) { throw "Failed to add DNS server $($dnsServers[$i])." }
+        $dnsOutput = & netsh interface ipv4 add dnsservers `
+            "name=$TunName" "address=$extraDns" "index=$($i + 1)" `
+            validate=no 2>&1
+
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to add DNS server ($extraDns): $($dnsOutput -join ' ')"
         }
     }
 
@@ -271,43 +250,86 @@ function Sync-TunnelToSSID {
     }
 }
 
-try {
-    # Infer the initial state from the newest logged event for this SSID.
-    $latestTargetEvent = Get-WinEvent -FilterHashtable @{
-        LogName = 'Microsoft-Windows-WLAN-AutoConfig/Operational'
-        Id      = 8001, 8003
-    } -MaxEvents 100 |
-            Where-Object {
-                $_.Message -match "(?im)^\s*(Network )?SSID:\s*$([regex]::Escape($TargetSSID))\s*$"
-            } |
-            Select-Object -First 1
+############################ Main Execution ###################################
+function main {
 
-    [WlanTunnelSignal]::Connected = (
-    $latestTargetEvent -and $latestTargetEvent.Id -eq 8001
-    )
+    $configPath = [System.IO.Path]::ChangeExtension($PSCommandPath, '.yaml')
+    $config = Import-TunnelConfig -Path $configPath
 
-    [WlanTunnelSignal]::Start()
-    Sync-TunnelToSSID
+    $TargetSSID = $config['ssid']
+    $TunName    = $config['tun_name']
 
-    Write-Host "Watching for '$TargetSSID'. Press Ctrl+C to exit."
+    $tunConfig = ConvertFrom-TunAddressCidr -Cidr $config['tun_address']
+    $TunAddress = $tunConfig.Address
+    $TunGateway = $tunConfig.Gateway
 
-    while ($true) {
-        if ([WlanTunnelSignal]::Changed) {
-            [WlanTunnelSignal]::Changed = $false
-            Start-Sleep -Milliseconds 800
+    $DnsPrimary = $config['dns_primary']
+    $DnsSecond  = $config['dns_second']
+    $Proxy      = $config['proxy']
+    $Tun2Socks  = Join-Path $PSScriptRoot 'tun2socks.exe'
+    # -------------------------
 
-            try {
-                Sync-TunnelToSSID
-            } catch {
-                Write-Error $_
-                Stop-Tunnel
-            }
-        }
+    $ErrorActionPreference = 'Stop'
+    $script:ProxyProcess = $null
+    $script:TunnelActive = $false
 
-        Start-Sleep -Milliseconds 250
+    if (-not ([Security.Principal.WindowsPrincipal]::new(
+            [Security.Principal.WindowsIdentity]::GetCurrent()
+    )).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+        throw 'Run this script as Administrator.'
     }
+
+    if (-not (Test-Path $Tun2Socks)) {
+        throw "Could not find tun2socks.exe: $Tun2Socks"
+    }
+
+    wevtutil sl Microsoft-Windows-WLAN-AutoConfig/Operational /e:true
+
+    Add-Types
+
+    [WlanTunnelSignal]::TargetSSID = $TargetSSID
+
+    try {
+        # Infer the initial state from the newest logged event for this SSID.
+        $latestTargetEvent = Get-WinEvent -FilterHashtable @{
+            LogName = 'Microsoft-Windows-WLAN-AutoConfig/Operational'
+            Id      = 8001, 8003
+        } -MaxEvents 100 |
+                Where-Object {
+                    $_.Message -match "(?im)^\s*(Network )?SSID:\s*$([regex]::Escape($TargetSSID))\s*$"
+                } |
+                Select-Object -First 1
+
+        [WlanTunnelSignal]::Connected = (
+        $latestTargetEvent -and $latestTargetEvent.Id -eq 8001
+        )
+
+        [WlanTunnelSignal]::Start()
+        Sync-TunnelToSSID
+
+        Write-Host "Watching for '$TargetSSID'. Press Ctrl+C to exit."
+
+        while ($true) {
+            if ([WlanTunnelSignal]::Changed) {
+                [WlanTunnelSignal]::Changed = $false
+                Start-Sleep -Milliseconds 800
+
+                try {
+                    Sync-TunnelToSSID
+                } catch {
+                    Write-Error $_
+                    Stop-Tunnel
+                }
+            }
+
+            Start-Sleep -Milliseconds 250
+        }
+    }
+    finally {
+        [WlanTunnelSignal]::Stop()
+        Stop-Tunnel
+    }
+
 }
-finally {
-    [WlanTunnelSignal]::Stop()
-    Stop-Tunnel
-}
+
+main
