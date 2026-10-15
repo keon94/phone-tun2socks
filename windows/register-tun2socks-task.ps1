@@ -35,7 +35,7 @@ if (-not $PowerShellExe) {
 }
 
 $UserName = $identity.Name
-$LogPath = Join-Path $PSScriptRoot 'turn2socks.log'
+$LogPath = Join-Path $PSScriptRoot 'tun2socks.log'
 $QuotedWatcherPath = "'" + $WatcherPath.Replace("'", "''") + "'"
 $QuotedLogPath = "'" + $LogPath.Replace("'", "''") + "'"
 $Command = "& $QuotedWatcherPath *> $QuotedLogPath"
