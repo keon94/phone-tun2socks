@@ -9,7 +9,7 @@ This has been written in an event driven way, so it runs very efficiently on you
 No, not in the "regular" sense. Typically, with phone carrier plans you need to buy a hotspot package from them to get this kind of access. You are also often limited by how
 much data you can use with their hotspot.
 
-This bypasses both limitations - you effectively get a full unrestricted internet connection that is proxied by your phone.
+This bypasses both limitations - you effectively get a full unrestricted internet connection that is proxied by your phone. The max you can use is bounded by your phone's data plan, not its hotspot plan.
 
 ### Audience
 This is in particular useful for people who travel a lot and don't have constant Wifi access. They can simply use this to connect their Phone's data to their laptop.
