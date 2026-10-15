@@ -4,7 +4,7 @@
 set -euo pipefail
 
 CONFIG_FILE=${CONFIG_FILE:-/etc/phone-tun2socks/config.yaml}
-POLICY_NAME=phone_tun2socks
+POLICY_NAME=tun2socks_hotspot
 PORT_TYPE=phone_proxy_port_t
 
 fail() { printf 'Error: %s\n' "$*" >&2; exit 1; }
@@ -55,7 +55,7 @@ tmp_dir=$(mktemp -d)
 trap 'rm -rf "$tmp_dir"' EXIT
 
 cat > "$tmp_dir/$POLICY_NAME.te" <<'POLICY'
-module phone_tun2socks 1.0;
+module tun2socks_hotspot 1.0;
 
 require {
     type init_t;

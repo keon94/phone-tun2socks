@@ -1,0 +1,7 @@
+target_ssid: "DIRECT-TF-TetherFi"
+tun_name: "tun0"
+tun_address: "10.0.0.2"
+tun_gateway: "10.0.0.1"
+dns_primary: ""
+dns_second: ""
+proxy: "192.168.49.1:8228"

@@ -1,10 +1,10 @@
 #!/bin/sh
 # NetworkManager dispatcher: connection events start/stop a transient systemd service.
-# Install beside this script: 90-phone-tun2socks.yaml
+# Install beside this script: 90-tun2socks.yaml
 set -eu
 
-NAME=phone-tun2socks
-CONFIG="/etc/phone-tun2socks/config.yaml"
+NAME=tun2socks-hotspot
+CONFIG="/etc/tun2socks-hotspot/config.yaml"
 
 [ -r "$CONFIG" ] || { echo "Missing config: $CONFIG" >&2; exit 1; }
 
