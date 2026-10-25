@@ -15,7 +15,7 @@ Keep these files together in one directory, for example `C:\Program Files\Tun2So
 | `wlanTunnelSignal.cs` | C# event-watcher type imported by the PowerShell script. |
 | `register-tun2socks-task.ps1` | Registers or removes the login task. |
 
-Additionally, you need the TUN binaries available on your PATH. You might as well put them in the same directory as the files above:
+You need to have `Powershell 7` installed. Additionally, you need the TUN binaries available on your PATH. You might as well put them in the same directory as the files above:
 
 - `tun2socks.exe` [Get from here](https://github.com/xjasonlyu/tun2socks/releases)
 - `wintun.dll` [Get from here](https://www.wintun.net/)
